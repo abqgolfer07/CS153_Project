@@ -961,4 +961,234 @@ Provide analysis in the following format:
                 "message": f"Error analyzing feedback trends: {str(e)}"
             }
         finally:
+            db_session.close()
+
+    def _detect_significant_events(self, entries, sentiment_shifts):
+        """
+        Detect significant life events based on content and sentiment analysis
+        
+        Args:
+            entries: List of journal entries
+            sentiment_shifts: List of major sentiment changes
+            
+        Returns:
+            List of significant events with metadata
+        """
+        significant_events = []
+        
+        # Group entries by month for temporal clustering
+        entries_by_month = {}
+        for entry in entries:
+            month_key = entry.timestamp.strftime("%Y-%m")
+            if month_key not in entries_by_month:
+                entries_by_month[month_key] = []
+            entries_by_month[month_key].append(entry)
+        
+        # Analyze each month's entries for significant events
+        for month, month_entries in entries_by_month.items():
+            # Find entries with strong emotional intensity
+            emotional_entries = [
+                entry for entry in month_entries
+                if entry.sentiment and abs(entry.sentiment.compound_score) > 0.5
+            ]
+            
+            # Find entries mentioning key life event indicators
+            event_keywords = [
+                "started", "finished", "achieved", "moved", "met", "learned",
+                "decided", "changed", "celebrated", "experienced", "realized"
+            ]
+            
+            event_entries = [
+                entry for entry in month_entries
+                if any(keyword in entry.message_content.lower() for keyword in event_keywords)
+            ]
+            
+            # Combine and deduplicate significant entries
+            significant_month_entries = list(set(emotional_entries + event_entries))
+            
+            if significant_month_entries:
+                # Create event summaries for the month
+                for entry in significant_month_entries:
+                    event = {
+                        "date": entry.timestamp.strftime("%Y-%m-%d"),
+                        "content": entry.message_content,
+                        "sentiment": entry.sentiment.compound_score if entry.sentiment else 0,
+                        "dominant_emotion": self._get_dominant_emotion(entry.sentiment) if entry.sentiment else None
+                    }
+                    significant_events.append(event)
+        
+        # Add major sentiment shifts as potential life events
+        for shift in sentiment_shifts:
+            if not any(event["date"] == shift["date"] for event in significant_events):
+                significant_events.append(shift)
+        
+        # Sort events chronologically
+        significant_events.sort(key=lambda x: x["date"])
+        return significant_events
+
+    def _get_dominant_emotion(self, sentiment):
+        """Get the dominant emotion from a sentiment record"""
+        emotions = {
+            "joy": sentiment.joy,
+            "trust": sentiment.trust,
+            "fear": sentiment.fear,
+            "surprise": sentiment.surprise,
+            "sadness": sentiment.sadness,
+            "disgust": sentiment.disgust,
+            "anger": sentiment.anger,
+            "anticipation": sentiment.anticipation
+        }
+        return max(emotions.items(), key=lambda x: x[1])[0]
+
+    async def generate_life_story(self, user_id: str) -> Dict[str, Any]:
+        """
+        Generate a narrative life story from user's journal entries
+        
+        Args:
+            user_id: The user's ID
+            
+        Returns:
+            Dictionary containing the story sections and metadata
+        """
+        try:
+            # Create database session
+            db_session = self.Session()
+            
+            # Retrieve all user's entries
+            entries = (
+                db_session.query(ChatLog)
+                .filter(ChatLog.user_id == user_id)
+                .order_by(ChatLog.timestamp.asc())
+                .all()
+            )
+            
+            if not entries:
+                return {
+                    "success": False,
+                    "message": "No journal entries found to create your life story."
+                }
+            
+            # Calculate sentiment trends and shifts
+            sentiment_shifts = []
+            prev_sentiment = None
+            window_size = 5  # Number of entries to average for trend detection
+            
+            for i in range(len(entries) - window_size + 1):
+                window = entries[i:i + window_size]
+                window_sentiments = [
+                    e.sentiment.compound_score for e in window 
+                    if e.sentiment and e.sentiment.compound_score is not None
+                ]
+                
+                if window_sentiments:
+                    avg_sentiment = sum(window_sentiments) / len(window_sentiments)
+                    
+                    if prev_sentiment is not None:
+                        # Detect significant sentiment shifts
+                        if abs(avg_sentiment - prev_sentiment) > 0.5:
+                            shift = {
+                                "date": window[-1].timestamp.strftime("%Y-%m-%d"),
+                                "content": "Significant emotional shift detected",
+                                "sentiment": avg_sentiment,
+                                "shift_magnitude": avg_sentiment - prev_sentiment
+                            }
+                            sentiment_shifts.append(shift)
+                    
+                    prev_sentiment = avg_sentiment
+            
+            # Detect significant events
+            significant_events = self._detect_significant_events(entries, sentiment_shifts)
+            
+            if not significant_events:
+                return {
+                    "success": False,
+                    "message": "Not enough significant events found to create a meaningful story."
+                }
+            
+            # Prepare the narrative prompt
+            events_text = "\n\n".join([
+                f"Date: {event['date']}\n"
+                f"Event: {event['content']}\n"
+                f"Emotional State: {event['dominant_emotion'].title() if 'dominant_emotion' in event else 'Shift in emotions'}"
+                for event in significant_events
+            ])
+            
+            prompt = (
+                "Based on the following journal entries and emotional patterns, "
+                "create an engaging personal narrative that tells this person's life story. "
+                "Focus on character development, emotional growth, and connecting events into a cohesive journey. "
+                "Divide the story into titled chapters that mark significant phases or transitions. "
+                "Each chapter should have a clear theme and emotional arc.\n\n"
+                f"Journal Timeline:\n{events_text}\n\n"
+                "Format the story with the following structure:\n"
+                "1. A brief prologue summarizing the overall journey\n"
+                "2. 3-5 chapters, each with a meaningful title and focused narrative\n"
+                "3. A reflective epilogue that connects past experiences to present growth\n"
+                "Keep each chapter concise but meaningful, highlighting key moments of change and growth."
+            )
+            
+            # Generate the narrative using Mistral
+            response = await self.mistral_client.chat.complete_async(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": "You are an empathetic AI assistant creating engaging personal narratives from journal entries."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            # Get the response text
+            response_text = response.choices[0].message.content.strip()
+            
+            # Process and structure the narrative
+            story_sections = []
+            current_section = {"title": "", "content": []}
+            
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Detect section headers
+                if line.upper() == line and len(line) > 10:  # Likely a header
+                    if current_section["title"]:
+                        story_sections.append(current_section)
+                    current_section = {"title": line, "content": []}
+                else:
+                    current_section["content"].append(line)
+            
+            # Add the last section
+            if current_section["title"]:
+                story_sections.append(current_section)
+            
+            # Create metadata
+            metadata = {
+                "total_entries": len(entries),
+                "significant_events": len(significant_events),
+                "date_range": {
+                    "start": entries[0].timestamp.strftime("%Y-%m-%d"),
+                    "end": entries[-1].timestamp.strftime("%Y-%m-%d")
+                },
+                "emotional_journey": {
+                    "major_shifts": len(sentiment_shifts),
+                    "overall_arc": "positive" if sentiment_shifts and sentiment_shifts[-1]["sentiment"] > sentiment_shifts[0]["sentiment"]
+                                 else "negative" if sentiment_shifts and sentiment_shifts[-1]["sentiment"] < sentiment_shifts[0]["sentiment"]
+                                 else "stable" if sentiment_shifts else "undefined"
+                }
+            }
+            
+            return {
+                "success": True,
+                "story_sections": story_sections,
+                "metadata": metadata,
+                "events": significant_events
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating life story: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error generating life story: {str(e)}"
+            }
+        
+        finally:
             db_session.close() 
