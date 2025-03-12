@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey, Table
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime, UTC
@@ -17,6 +17,9 @@ class ChatLog(Base):
     
     # Relationship with sentiment analysis
     sentiment = relationship("MessageSentiment", back_populates="chat_log", uselist=False)
+
+    # Relationship with capsule entries
+    capsule_entries = relationship("CapsuleEntry", backref="original_entry")
 
 class MessageSentiment(Base):
     __tablename__ = 'message_sentiments'
@@ -122,6 +125,33 @@ class UserAchievement(Base):
     # Relationships
     user_profile = relationship("UserProfile", back_populates="achievements")
     achievement = relationship("Achievement", back_populates="user_achievements")
+
+class MemoryCapsule(Base):
+    """Store themed memory capsules for users"""
+    __tablename__ = 'memory_capsules'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)  # e.g., "Travel Memories"
+    description = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    
+    # Relationship with entries
+    entries = relationship("CapsuleEntry", back_populates="capsule", cascade="all, delete-orphan")
+
+class CapsuleEntry(Base):
+    """Store entries within memory capsules"""
+    __tablename__ = 'capsule_entries'
+    
+    id = Column(Integer, primary_key=True)
+    capsule_id = Column(Integer, ForeignKey('memory_capsules.id', ondelete="CASCADE"), nullable=False)
+    chat_log_id = Column(Integer, ForeignKey('chat_logs.id'), nullable=False)
+    added_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    
+    # Relationships
+    capsule = relationship("MemoryCapsule", back_populates="entries")
+    chat_log = relationship("ChatLog")
 
 # Create database engine and tables
 engine = create_engine('sqlite:///chat_logs.db')

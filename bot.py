@@ -11,6 +11,7 @@ from journal_analyzer import JournalAnalyzer
 from dashboard import Dashboard
 from datetime import datetime, timedelta, UTC
 from gamification import GamificationManager
+from memory_capsule_manager import MemoryCapsuleManager
 import asyncio
 
 PREFIX = "!"
@@ -42,6 +43,9 @@ dashboard = Dashboard(Session)
 # Initialize gamification manager with a session instance
 db_session = Session()
 gamification_manager = GamificationManager(db_session)
+
+# Initialize memory capsule manager with a session instance
+memory_capsule_manager = MemoryCapsuleManager(db_session)
 
 # Get the token from the environment variables
 token = os.getenv("DISCORD_TOKEN")
@@ -920,6 +924,21 @@ async def menu(ctx):
     )
     await send_menu_section("", journaling_text)
 
+    # Memory Capsules Commands
+    memory_capsules_text = (
+        "📔 **Memory Capsules**\n"
+        "`!createCapsule <name> [description]` - Create a new themed memory capsule\n"
+        "`!addToCapsule <capsule_id> <entry_number>` - Add an entry to a capsule\n"
+        "`!viewCapsule <capsule_id>` - View capsule contents and narrative\n"
+        "`!listCapsules` - List all your memory capsules\n"
+        "`!deleteCapsule <capsule_id>` - Delete a memory capsule\n\n"
+        "💡 **Tips**\n"
+        "• Create themed capsules for different aspects of your life\n"
+        "• Use entry numbers from `!history` when adding to capsules\n"
+        "• Each capsule generates its own themed narrative"
+    )
+    await send_menu_section("", memory_capsules_text)
+
     # Time Capsule Commands
     time_capsule_text = (
         "⏳ **Time Capsule**\n"
@@ -1475,6 +1494,160 @@ async def leaderboard(ctx, category: str = "total_entries"):
     except Exception as e:
         logger.error(f"Error displaying leaderboard: {str(e)}")
         await ctx.send("Sorry, there was an error displaying the leaderboard. Please try again later.")
+
+@bot.command(name="createCapsule", help="Create a new themed memory capsule (e.g., '!createCapsule Travel Memories My travel experiences')")
+async def create_capsule(ctx, name: str, *, description: str = None):
+    """Create a new themed memory capsule"""
+    try:
+        result = await memory_capsule_manager.create_capsule(
+            str(ctx.author.id),
+            name,
+            description
+        )
+        
+        if result["success"]:
+            response = (
+                f"✨ {result['message']}\n\n"
+                "You can now add entries to this capsule using:\n"
+                f"`!addToCapsule {result['capsule_id']} <entry_number>`\n\n"
+                "💡 Entry numbers can be found using the `!history` command."
+            )
+        else:
+            response = f"❌ {result['message']}"
+        
+        await ctx.send(response)
+        
+    except Exception as e:
+        logger.error(f"Error creating capsule: {str(e)}")
+        await ctx.send("❌ An error occurred while creating your memory capsule.")
+
+@bot.command(name="addToCapsule", help="Add a journal entry to a memory capsule (e.g., '!addToCapsule 1 3' to add entry #3 to capsule #1)")
+async def add_to_capsule(ctx, capsule_id: int, entry_number: int):
+    """Add a journal entry to a memory capsule"""
+    try:
+        # Get the specified entry
+        db_session = Session()
+        entries = (
+            db_session.query(ChatLog)
+            .filter(ChatLog.user_id == str(ctx.author.id))
+            .order_by(ChatLog.timestamp.desc())
+            .all()
+        )
+        
+        if not entries or entry_number > len(entries) or entry_number < 1:
+            await ctx.send(f"❌ Entry #{entry_number} not found. You have {len(entries)} entries.")
+            return
+        
+        # Get the chat log ID for the specified entry
+        chat_log_id = entries[entry_number - 1].id
+        
+        # Add entry to capsule
+        result = await memory_capsule_manager.add_entry(
+            str(ctx.author.id),
+            capsule_id,
+            chat_log_id
+        )
+        
+        await ctx.send(f"{'✨' if result['success'] else '❌'} {result['message']}")
+        
+    except Exception as e:
+        logger.error(f"Error adding to capsule: {str(e)}")
+        await ctx.send("❌ An error occurred while adding the entry to your capsule.")
+    finally:
+        db_session.close()
+
+@bot.command(name="viewCapsule", help="View the contents and narrative of a memory capsule (e.g., '!viewCapsule 1')")
+async def view_capsule(ctx, capsule_id: int):
+    """View a memory capsule's contents and narrative"""
+    try:
+        result = await memory_capsule_manager.get_capsule_contents(
+            str(ctx.author.id),
+            capsule_id
+        )
+        
+        if not result["success"]:
+            await ctx.send(f"❌ {result['message']}")
+            return
+        
+        # Send capsule header
+        header = (
+            f"📔 **{result['capsule']['name']}**\n"
+            f"*{result['capsule']['description'] or 'No description provided'}*\n"
+            f"Created: {result['capsule']['created_at'][:10]}\n"
+            f"Entries: {result['capsule']['entry_count']}\n\n"
+        )
+        await ctx.send(header)
+        
+        # Send entries in chronological order
+        if result["entries"]:
+            entries_msg = "**📝 Entries:**\n"
+            for entry in result["entries"]:
+                date = entry["timestamp"][:10]
+                preview = entry["content"][:100] + "..." if len(entry["content"]) > 100 else entry["content"]
+                entries_msg += f"\n• {date}: {preview}"
+            
+            # Split entries into chunks if needed
+            chunks = [entries_msg[i:i+1900] for i in range(0, len(entries_msg), 1900)]
+            for chunk in chunks:
+                await ctx.send(chunk)
+        
+        # Send narrative summary
+        await ctx.send("\n**📖 Narrative Summary:**\n")
+        
+        # Split narrative into chunks
+        narrative_chunks = [result["narrative"][i:i+1900] for i in range(0, len(result["narrative"]), 1900)]
+        for chunk in narrative_chunks:
+            await ctx.send(chunk)
+        
+    except Exception as e:
+        logger.error(f"Error viewing capsule: {str(e)}")
+        await ctx.send("❌ An error occurred while retrieving your memory capsule.")
+
+@bot.command(name="listCapsules", help="List all your memory capsules")
+async def list_capsules(ctx):
+    """List all memory capsules for the user"""
+    try:
+        result = await memory_capsule_manager.list_capsules(str(ctx.author.id))
+        
+        if not result["success"]:
+            await ctx.send(f"❌ {result['message']}")
+            return
+        
+        if not result["capsules"]:
+            await ctx.send("You haven't created any memory capsules yet. Use `!createCapsule` to get started!")
+            return
+        
+        # Format capsules list
+        response = "📚 **Your Memory Capsules**\n\n"
+        
+        for capsule in result["capsules"]:
+            response += (
+                f"**{capsule['name']}** (ID: {capsule['id']})\n"
+                f"• Description: {capsule['description'] or 'No description'}\n"
+                f"• Created: {capsule['created_at'][:10]}\n"
+                f"• Entries: {capsule['entry_count']}\n\n"
+            )
+        
+        await ctx.send(response)
+        
+    except Exception as e:
+        logger.error(f"Error listing capsules: {str(e)}")
+        await ctx.send("❌ An error occurred while retrieving your capsules.")
+
+@bot.command(name="deleteCapsule", help="Delete a memory capsule (e.g., '!deleteCapsule 1')")
+async def delete_capsule(ctx, capsule_id: int):
+    """Delete a memory capsule"""
+    try:
+        result = await memory_capsule_manager.delete_capsule(
+            str(ctx.author.id),
+            capsule_id
+        )
+        
+        await ctx.send(f"{'✨' if result['success'] else '❌'} {result['message']}")
+        
+    except Exception as e:
+        logger.error(f"Error deleting capsule: {str(e)}")
+        await ctx.send("❌ An error occurred while deleting your capsule.")
 
 # Start the bot, connecting it to the gateway
 bot.run(token)
