@@ -10,6 +10,8 @@ from sentiment_analyzer import SentimentAnalyzer
 from journal_analyzer import JournalAnalyzer
 from dashboard import Dashboard
 from datetime import datetime, timedelta, UTC
+from gamification import GamificationManager
+import asyncio
 
 PREFIX = "!"
 
@@ -36,6 +38,10 @@ agent = MistralAgent()
 sentiment_analyzer = SentimentAnalyzer()
 journal_analyzer = JournalAnalyzer()
 dashboard = Dashboard(Session)
+
+# Initialize gamification manager with a session instance
+db_session = Session()
+gamification_manager = GamificationManager(db_session)
 
 # Get the token from the environment variables
 token = os.getenv("DISCORD_TOKEN")
@@ -193,9 +199,12 @@ async def journal_entry(ctx, *, entry_text: str):
         # Send the analysis
         await ctx.send(response)
         
+        # Update user's profile and check for achievements
+        await gamification_manager.update_profile_stats(str(ctx.author.id), ctx.author.name)
+        
     except Exception as e:
         logger.error(f"Error processing journal entry: {str(e)}")
-        await ctx.send("I encountered an error while processing your journal entry. Please try again later.")
+        await ctx.send("Sorry, there was an error processing your journal entry. Please try again later.")
 
 @bot.command(name="clear", help="Clear your journal entries and future messages. Use '!clear journal' to clear all journal entries, '!clear journal <entry_number>' to delete a specific entry, '!clear futureMessages' to clear all future messages, or '!clear futureMessage <message_number>' to delete a specific future message.")
 async def clear(ctx, clear_type: str = None, entry_number: int = None):
@@ -896,7 +905,7 @@ async def menu(ctx):
 
     # Introduction
     await ctx.send("🤖 **Available Commands**\n")
-
+    
     # Journaling Commands
     journaling_text = (
         "📝 **Journaling**\n"
@@ -918,14 +927,17 @@ async def menu(ctx):
         "`!viewFutureMessages [limit=5]` - View your saved messages"
     )
     await send_menu_section("", time_capsule_text)
-
-    # Analysis Commands
+    
+    # Analysis & Gamification Commands
     analysis_text = (
-        "📊 **Analysis & Visualization**\n"
+        "📊 **Analysis & Gamification**\n"
         "`!sentiment` - Get sentiment analysis for recent messages\n"
         "`!dashboard [days=30]` - View your mood trends dashboard\n"
         "`!timeline` - View your complete journal timeline\n"
-        "`!lifeStory` - Generate an interactive narrative of your journey"
+        "`!lifeStory` - Generate an interactive narrative of your journey\n"
+        "`!profile` - View your journaling stats and achievements\n"
+        "`!leaderboard [category]` - View top users in different categories\n"
+        "  Categories: entries, streak, words, reflection, achievements"
     )
     await send_menu_section("", analysis_text)
 
@@ -939,7 +951,7 @@ async def menu(ctx):
         "`!clear futureMessage <message_number>` - Delete a specific future message"
     )
     await send_menu_section("", data_mgmt_text)
-
+    
     # Feedback Commands
     feedback_text = (
         "💭 **Feedback**\n"
@@ -1350,6 +1362,119 @@ Format the response as a warm, inviting message that makes them want to start wr
 async def before_check_inactive_users():
     """Wait until the bot is ready before starting the task"""
     await bot.wait_until_ready()
+
+@bot.command(name="profile", help="View your journaling profile and achievements")
+async def profile(ctx):
+    """Display user's profile with stats and achievements"""
+    try:
+        profile_data = await gamification_manager.get_profile_data(str(ctx.author.id))
+        if not profile_data:
+            await ctx.send("You haven't started journaling yet! Write your first entry to begin your journey.")
+            return
+        
+        # Format profile embed
+        embed = discord.Embed(
+            title=f"📊 {profile_data['username']}'s Journal Profile",
+            color=discord.Color.blue()
+        )
+        
+        # Stats section
+        stats = (
+            f"📝 **Entries:** {profile_data['total_entries']}\n"
+            f"📚 **Words Written:** {profile_data['total_words']}\n"
+            f"🔥 **Current Streak:** {profile_data['current_streak']} days\n"
+            f"⭐ **Longest Streak:** {profile_data['longest_streak']} days\n"
+            f"🎯 **Reflection Score:** {profile_data['reflection_score']:.1f}/100\n"
+            f"💭 **Average Sentiment:** {profile_data['avg_sentiment']:.2f}"
+        )
+        embed.add_field(name="Stats", value=stats, inline=False)
+        
+        # Achievements section
+        if profile_data['earned_achievements']:
+            achievements = "\n".join(
+                f"{ach['icon']} **{ach['name']}** - {ach['description']}"
+                for ach in profile_data['earned_achievements']
+            )
+            embed.add_field(name="🏆 Earned Achievements", value=achievements, inline=False)
+        
+        # In-progress achievements
+        if profile_data['in_progress']:
+            in_progress = "\n".join(
+                f"{ach['icon']} **{ach['name']}** - {ach['progress']:.1f}%"
+                for ach in profile_data['in_progress']
+            )
+            embed.add_field(name="🎯 Achievements in Progress", value=in_progress, inline=False)
+        
+        # Last entry
+        if profile_data['last_entry']:
+            last_entry = profile_data['last_entry'].strftime("%Y-%m-%d %H:%M UTC")
+            embed.set_footer(text=f"Last entry: {last_entry}")
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error displaying profile: {str(e)}")
+        await ctx.send("Sorry, there was an error displaying your profile. Please try again later.")
+
+@bot.command(name="leaderboard", help="View the journaling leaderboard")
+async def leaderboard(ctx, category: str = "total_entries"):
+    """Display leaderboard for various categories"""
+    try:
+        # Validate and normalize category
+        category = category.lower()
+        valid_categories = {
+            "entries": "total_entries",
+            "streak": "streak",
+            "words": "words",
+            "reflection": "reflection",
+            "achievements": "achievements"
+        }
+        
+        if category not in valid_categories:
+            categories_list = ", ".join(f"`{cat}`" for cat in valid_categories.keys())
+            await ctx.send(f"Invalid category! Please choose from: {categories_list}")
+            return
+        
+        # Get leaderboard data
+        data = await gamification_manager.get_leaderboard(
+            category=valid_categories[category],
+            limit=10
+        )
+        
+        if not data:
+            await ctx.send("No data available for the leaderboard yet!")
+            return
+        
+        # Create embed
+        titles = {
+            "total_entries": "Most Journal Entries",
+            "streak": "Longest Active Streaks",
+            "words": "Most Words Written",
+            "reflection": "Highest Reflection Scores",
+            "achievements": "Most Achievements Earned"
+        }
+        
+        embed = discord.Embed(
+            title=f"📊 {titles[valid_categories[category]]}",
+            color=discord.Color.gold()
+        )
+        
+        # Format leaderboard entries
+        medals = ["🥇", "🥈", "🥉"]
+        leaderboard_text = ""
+        
+        for i, entry in enumerate(data):
+            medal = medals[i] if i < 3 else "▫️"
+            leaderboard_text += f"{medal} **{entry['username']}**: {entry['value']} {entry['label']}\n"
+        
+        embed.description = leaderboard_text
+        embed.set_footer(text=f"Use !leaderboard <category> to view other categories")
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error displaying leaderboard: {str(e)}")
+        await ctx.send("Sorry, there was an error displaying the leaderboard. Please try again later.")
 
 # Start the bot, connecting it to the gateway
 bot.run(token)

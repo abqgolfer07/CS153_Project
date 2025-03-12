@@ -186,6 +186,18 @@ Generate a growth forecast that includes:
 Keep predictions grounded in observed patterns while maintaining an optimistic but realistic tone.
 Focus on actionable insights and achievable goals.'''
 
+        # Define meditation prompt template
+        self.meditation_prompt = """User's Emotional Context:
+{emotional_summary}
+Dominant Emotions: {dominant_emotions}
+Key Themes: {themes}
+
+Create a short guided meditation (max 1500 characters) that:
+1. Addresses these emotions with empathy
+2. Includes breathing cues and [Pause] indicators
+3. Provides gentle guidance for emotional awareness
+4. Ends with a sense of peace"""
+
     def preprocess_text(self, text: str) -> str:
         """
         Preprocess the journal entry text
@@ -1347,4 +1359,172 @@ Provide analysis in the following format:
                 "message": f"Error generating growth forecast: {str(e)}"
             }
         finally:
-            db_session.close() 
+            db_session.close()
+
+    async def generate_meditation(self, user_id: str) -> Dict[str, Any]:
+        """
+        Generate a personalized guided meditation based on user's emotional state
+        
+        Args:
+            user_id: The user's unique identifier
+            
+        Returns:
+            Dictionary containing the meditation script and context
+        """
+        db_session = self.Session()
+        try:
+            # Get recent entries (last 7 days)
+            cutoff_date = datetime.now(UTC) - timedelta(days=7)
+            recent_entries = (
+                db_session.query(ChatLog)
+                .filter(
+                    ChatLog.user_id == user_id,
+                    ChatLog.timestamp >= cutoff_date
+                )
+                .order_by(ChatLog.timestamp.desc())
+                .all()
+            )
+            
+            if not recent_entries:
+                return {
+                    "success": False,
+                    "message": "I need some recent journal entries to create a personalized meditation. Try journaling first!"
+                }
+            
+            # Analyze emotional patterns
+            emotional_states = []
+            all_emotions = {
+                'joy': 0, 'trust': 0, 'fear': 0, 'surprise': 0,
+                'sadness': 0, 'disgust': 0, 'anger': 0, 'anticipation': 0
+            }
+            sentiment_scores = []
+            themes = set()
+            
+            try:
+                for entry in recent_entries:
+                    if entry.sentiment:
+                        # Track emotion scores
+                        emotions = {
+                            'joy': entry.sentiment.joy,
+                            'trust': entry.sentiment.trust,
+                            'fear': entry.sentiment.fear,
+                            'surprise': entry.sentiment.surprise,
+                            'sadness': entry.sentiment.sadness,
+                            'disgust': entry.sentiment.disgust,
+                            'anger': entry.sentiment.anger,
+                            'anticipation': entry.sentiment.anticipation
+                        }
+                        
+                        # Update running totals
+                        for emotion, score in emotions.items():
+                            all_emotions[emotion] += score
+                        
+                        # Get dominant emotion for this entry
+                        dominant = max(emotions.items(), key=lambda x: x[1])
+                        emotional_states.append(dominant[0])
+                        
+                        # Track sentiment scores
+                        sentiment_scores.append(entry.sentiment.compound_score)
+                    
+                    # Analyze entry for themes
+                    try:
+                        analysis = await self.analyze_sentiment(entry.message_content)
+                        if analysis and isinstance(analysis, dict):
+                            if 'themes' in analysis and isinstance(analysis['themes'], dict):
+                                if 'themes' in analysis['themes'] and isinstance(analysis['themes']['themes'], list):
+                                    themes.update(analysis['themes']['themes'])
+                    except Exception as theme_error:
+                        logger.warning(f"Error analyzing themes for entry: {str(theme_error)}")
+                        continue
+                
+                # Calculate overall emotional state
+                avg_emotions = {k: v / len(recent_entries) for k, v in all_emotions.items()}
+                dominant_emotions = sorted(avg_emotions.items(), key=lambda x: x[1], reverse=True)[:3]
+                
+                # Calculate average sentiment
+                avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0
+                
+                # Create emotional summary
+                emotional_summary = self._get_emotional_summary(dominant_emotions, avg_sentiment)
+                
+                # Format the meditation prompt with safe theme handling
+                theme_list = list(themes)[:2] if themes else ["mindfulness", "self-reflection"]
+                prompt_context = self.meditation_prompt.format(
+                    emotional_summary=emotional_summary,
+                    dominant_emotions=", ".join(f"{emotion}" for emotion, _ in dominant_emotions[:2]),
+                    themes=", ".join(theme_list)
+                )
+                
+                # Generate meditation script using Mistral
+                response = await self.mistral_client.chat.complete_async(
+                    model="mistral-large-latest",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a meditation guide. Create brief, calming meditations under 1500 characters. Include [Pause] indicators for breaks."
+                        },
+                        {"role": "user", "content": prompt_context}
+                    ],
+                    max_tokens=750  # Further limit the response length
+                )
+                
+                meditation_script = response.choices[0].message.content.strip()
+                
+                # Ensure the script isn't too long
+                if len(meditation_script) > 1500:
+                    meditation_script = meditation_script[:1500].rsplit('\n', 1)[0] + "\n\nMay you find peace and clarity. 🌟"
+                
+                return {
+                    "success": True,
+                    "script": meditation_script,
+                    "emotional_state": emotional_summary
+                }
+                
+            except Exception as analysis_error:
+                logger.error(f"Error analyzing emotions: {str(analysis_error)}")
+                return {
+                    "success": False,
+                    "message": "An error occurred while analyzing your emotional state. Please try again later."
+                }
+            
+        except Exception as e:
+            logger.error(f"Error generating meditation: {str(e)}")
+            return {
+                "success": False,
+                "message": "An error occurred while generating your meditation. Please try again later."
+            }
+            
+        finally:
+            db_session.close()
+    
+    def _get_emotional_summary(self, dominant_emotions: List[Tuple[str, float]], avg_sentiment: float) -> str:
+        """
+        Create a human-readable summary of emotional state
+        
+        Args:
+            dominant_emotions: List of (emotion, score) tuples
+            avg_sentiment: Average sentiment score
+            
+        Returns:
+            String describing the emotional state
+        """
+        # Get the top emotions
+        primary_emotion = dominant_emotions[0][0] if dominant_emotions else "neutral"
+        secondary_emotion = dominant_emotions[1][0] if len(dominant_emotions) > 1 else None
+        
+        # Determine sentiment level
+        sentiment_desc = (
+            "very positive" if avg_sentiment > 0.5
+            else "somewhat positive" if avg_sentiment > 0.1
+            else "neutral" if avg_sentiment >= -0.1
+            else "somewhat negative" if avg_sentiment >= -0.5
+            else "very negative"
+        )
+        
+        # Create emotional state description
+        if secondary_emotion:
+            state = f"in a {sentiment_desc} space of {primary_emotion} and {secondary_emotion}"
+        else:
+            state = f"in a {sentiment_desc} state of {primary_emotion}"
+            
+        return state 

@@ -74,6 +74,55 @@ class Feedback(Base):
     # Relationship with sentiment analysis
     sentiment = relationship("MessageSentiment")
 
+class UserProfile(Base):
+    """Store user engagement metrics and statistics"""
+    __tablename__ = 'user_profiles'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(100), nullable=False, unique=True)
+    username = Column(String(100), nullable=False)
+    total_entries = Column(Integer, default=0)
+    total_words = Column(Integer, default=0)
+    avg_sentiment = Column(Float, default=0.0)
+    streak_days = Column(Integer, default=0)
+    longest_streak = Column(Integer, default=0)
+    last_entry_date = Column(DateTime)
+    reflection_score = Column(Float, default=0.0)  # Score based on entry depth/quality
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    
+    # Relationship with achievements
+    achievements = relationship("UserAchievement", back_populates="user_profile")
+
+class Achievement(Base):
+    """Define available achievements and their criteria"""
+    __tablename__ = 'achievements'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=False)
+    criteria_type = Column(String(50), nullable=False)  # e.g., 'streak', 'total_entries', 'sentiment'
+    criteria_value = Column(Integer, nullable=False)  # Value needed to earn achievement
+    badge_icon = Column(String(100), nullable=False)  # Icon/emoji representing the achievement
+    tier = Column(Integer, default=1)  # Achievement tier (1=bronze, 2=silver, 3=gold)
+    
+    # Relationship with user achievements
+    user_achievements = relationship("UserAchievement", back_populates="achievement")
+
+class UserAchievement(Base):
+    """Track which achievements each user has earned"""
+    __tablename__ = 'user_achievements'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(100), ForeignKey('user_profiles.user_id'), nullable=False)
+    achievement_id = Column(Integer, ForeignKey('achievements.id'), nullable=False)
+    earned_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    progress = Column(Float, default=0.0)  # Progress towards achievement (0-100%)
+    
+    # Relationships
+    user_profile = relationship("UserProfile", back_populates="achievements")
+    achievement = relationship("Achievement", back_populates="user_achievements")
+
 # Create database engine and tables
 engine = create_engine('sqlite:///chat_logs.db')
 Base.metadata.create_all(engine) 
