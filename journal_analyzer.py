@@ -479,8 +479,7 @@ Create a short guided meditation (max 1500 characters) that:
                 anticipation=sentiment_analysis["emotions"]["anticipation"],
                 confidence=sentiment_analysis["confidence"],
                 intensity=sentiment_analysis["intensity"],
-                compound_score=sentiment_analysis["compound_score"],
-                timestamp=datetime.now(UTC)
+                compound_score=sentiment_analysis["compound_score"]
             )
             db_session.add(sentiment)
             db_session.flush()  # Get the sentiment ID
@@ -801,18 +800,18 @@ Create a short guided meditation (max 1500 characters) that:
         finally:
             db_session.close()
 
-    async def store_feedback(self, user_id: str, username: str, feedback_text: str, rating: int = None) -> Dict[str, Any]:
+    async def store_feedback(self, user_id: str, username: str, feedback_text: str, rating: int) -> Dict[str, Any]:
         """
-        Store and analyze user feedback about the time capsule experience
+        Store and analyze user feedback
         
         Args:
             user_id: The user's ID
             username: The user's username
             feedback_text: The feedback text
-            rating: Optional numerical rating
+            rating: Numerical rating (1-5)
             
         Returns:
-            Dictionary containing the feedback analysis and metadata
+            Dictionary containing analysis results
         """
         db_session = self.Session()
         try:
@@ -831,8 +830,7 @@ Create a short guided meditation (max 1500 characters) that:
                 anticipation=sentiment_analysis["emotions"]["anticipation"],
                 confidence=sentiment_analysis["confidence"],
                 intensity=sentiment_analysis["intensity"],
-                compound_score=sentiment_analysis["compound_score"],
-                timestamp=datetime.now(UTC)
+                compound_score=sentiment_analysis["compound_score"]
             )
             db_session.add(sentiment)
             db_session.flush()  # Get the sentiment ID
