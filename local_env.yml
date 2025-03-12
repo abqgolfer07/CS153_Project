@@ -1,6 +1,7 @@
 name: discord_bot
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - python>=3.13
   - pip
@@ -9,3 +10,8 @@ dependencies:
     - discord-py>=2.4.0
     - mistralai>=1.4.0
     - python-dotenv>=1.0.1
+    - sqlalchemy>=2.0.0
+    - transformers>=4.36.0
+    - torch>=2.1.0
+    - numpy>=1.24.0
+    - pandas>=2.1.0
