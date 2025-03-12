@@ -1,7 +1,7 @@
 import os
 import discord
 import logging
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from agent import MistralAgent
 from sqlalchemy.orm import sessionmaker
@@ -9,7 +9,7 @@ from models import engine, ChatLog, FutureMessage
 from sentiment_analyzer import SentimentAnalyzer
 from journal_analyzer import JournalAnalyzer
 from dashboard import Dashboard
-from datetime import datetime
+from datetime import datetime, timedelta, UTC
 
 PREFIX = "!"
 
@@ -54,7 +54,8 @@ async def on_ready():
     https://discordpy.readthedocs.io/en/latest/api.html#discord.on_ready
     """
     logger.info(f"{bot.user} has connected to Discord!")
-
+    # Start the journaling reminder task
+    check_inactive_users.start()
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -893,7 +894,11 @@ async def menu(ctx):
     menu_text += "📝 **Journaling**\n"
     menu_text += "`!journal <message>` - Log a journal entry and get sentiment analysis\n"
     menu_text += "`!history [days=7]` - View your recent journal entries and emotional trends\n"
-    menu_text += "`!reflect [days=30]` - Generate a reflection analysis of your past entries\n\n"
+    menu_text += "`!reflect [days=30]` - Generate a reflection analysis of your past entries\n"
+    menu_text += "\n💡 **Journaling Prompts**\n"
+    menu_text += "• Receive personalized writing prompts if you haven't journaled in a while\n"
+    menu_text += "• Prompts are tailored to your emotional patterns and previous entries\n"
+    menu_text += "• Sent automatically via DM to help maintain your journaling practice\n\n"
 
     # Time Capsule Commands
     menu_text += "⏳ **Time Capsule**\n"
@@ -932,8 +937,88 @@ async def menu(ctx):
     menu_text += "• Use quotes for messages containing spaces\n"
     menu_text += "• Some commands may take a moment to process\n"
     menu_text += "• Entry numbers are shown in `!history` and `!viewFutureMessages` commands\n"
+    menu_text += "• Enable DMs to receive personalized journaling prompts\n"
+
+    # Add Admin Commands section if user is authorized
+    if str(ctx.author.id) in AUTHORIZED_USERS:
+        menu_text += "\n🔧 **Admin Commands**\n"
+        menu_text += "`!testPrompt [user_id]` - Test journaling prompt generation\n"
+        menu_text += "`!viewFeedback` - View analysis of all feedback\n\n"
 
     await ctx.send(menu_text)
+
+@bot.command(name="testPrompt", help="(Admin only) Test the journaling prompt generation for a user")
+async def test_prompt(ctx, user_id: str = None):
+    """
+    Test the journaling prompt generation system
+    If no user_id is provided, generates a prompt for the command user
+    """
+    # Check if user is authorized
+    if str(ctx.author.id) not in AUTHORIZED_USERS:
+        await ctx.send("⚠️ This command is only available to system administrators.")
+        return
+
+    try:
+        # If no user_id provided, use the command author's ID
+        target_user_id = user_id or str(ctx.author.id)
+        db_session = Session()
+
+        try:
+            # Get user's emotional history for context
+            user_history = await journal_analyzer.get_emotional_trends(target_user_id, days=30)
+            
+            # Create a prompt based on user's history
+            prompt_context = f"""Generate a personalized journaling prompt for a user who hasn't written in their journal for a while.
+
+User's recent emotional trends:
+- Dominant emotions: {' → '.join(user_history.get('dominant_emotions', ['No data']))}
+- Last entry was more than 7 days ago
+
+Create an engaging, thoughtful prompt that:
+1. Acknowledges their absence without being judgmental
+2. Relates to their emotional patterns
+3. Encourages self-reflection
+4. Is specific enough to spark ideas but open-ended enough for personal expression
+
+Format the response as a warm, inviting message that makes them want to start writing again."""
+
+            # Generate personalized prompt using Mistral
+            prompt_response = await agent.client.chat.complete_async(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": "You are an empathetic journaling assistant."},
+                    {"role": "user", "content": prompt_context}
+                ]
+            )
+            
+            personalized_prompt = prompt_response.choices[0].message.content.strip()
+            
+            # Send the prompt in the channel for testing
+            test_message = (
+                "🧪 **Test: Journaling Prompt**\n\n"
+                f"Generated prompt for user ID: {target_user_id}\n\n"
+                "**The following message would be sent via DM:**\n"
+                "───────────────────────\n\n"
+                "📝 **Time for a Journal Entry!**\n\n"
+                f"Hey there! I noticed it's been a while since your last journal entry. "
+                "I've created a special prompt just for you:\n\n"
+                f"{personalized_prompt}\n\n"
+                "Ready to write? Just use the `!journal` command in our chat to share your thoughts!\n"
+                "💭 *Your journal is a safe space for self-reflection and growth.*\n\n"
+                "───────────────────────\n\n"
+                "✨ **Test Complete!**"
+            )
+            
+            await ctx.send(test_message)
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error generating test prompt: {str(e)}")
+        finally:
+            db_session.close()
+            
+    except Exception as e:
+        logger.error(f"Error in test_prompt command: {str(e)}")
+        await ctx.send("❌ An error occurred while testing the prompt generation.")
 
 def _get_sentiment_description(score: float) -> str:
     """Get a description of the sentiment score"""
@@ -1039,7 +1124,9 @@ async def on_command_error(ctx, error):
                 "⚠️ **Invalid Rating Format**\n\n"
                 "The feedback command requires a rating number (1-5) followed by your feedback message.\n\n"
                 "**Correct Format:**\n"
-                "`!feedback <rating> <message>`\n\n"
+                "`!feedback <rating> <message>`\n"
+                "• Rating must be a number from 1 to 5\n"
+                "• Message is your feedback text\n\n"
                 "**Examples:**\n"
                 "✅ `!feedback 5 This bot is amazing!`\n"
                 "✅ `!feedback 3 It's good but could be better`\n"
@@ -1066,6 +1153,104 @@ async def on_command_error(ctx, error):
             "❌ An error occurred while processing your command.\n"
             "Please check `!menu` for correct command usage or try again later."
         )
+
+# Scheduled task to check for inactive users and send prompts
+@tasks.loop(hours=24)  # Run once every 24 hours
+async def check_inactive_users():
+    """
+    Check for users who haven't logged an entry in 7 days and send them a personalized prompt.
+    This task runs daily and:
+    1. Queries the database for inactive users
+    2. Generates personalized prompts using Mistral
+    3. Sends prompts via DM to each inactive user
+    """
+    logger.info("Running scheduled check for inactive users...")
+    db_session = Session()
+    
+    try:
+        # Calculate the cutoff date (7 days ago)
+        cutoff_date = datetime.now(UTC) - timedelta(days=7)
+        
+        # Get all users who have ever journaled
+        all_users = db_session.query(ChatLog.user_id, ChatLog.username).distinct().all()
+        
+        # For each user, check their last entry
+        for user_id, username in all_users:
+            latest_entry = (
+                db_session.query(ChatLog)
+                .filter(ChatLog.user_id == user_id)
+                .order_by(ChatLog.timestamp.desc())
+                .first()
+            )
+            
+            # If user hasn't journaled in 7 days
+            if latest_entry and latest_entry.timestamp < cutoff_date:
+                try:
+                    # Get user's emotional history for context
+                    user_history = await journal_analyzer.get_emotional_trends(user_id, days=30)
+                    
+                    # Create a prompt based on user's history
+                    prompt_context = f"""Generate a personalized journaling prompt for a user who hasn't written in their journal for a while.
+
+User's recent emotional trends:
+- Dominant emotions: {' → '.join(user_history.get('dominant_emotions', ['No data']))}
+- Last entry was more than 7 days ago
+
+Create an engaging, thoughtful prompt that:
+1. Acknowledges their absence without being judgmental
+2. Relates to their emotional patterns
+3. Encourages self-reflection
+4. Is specific enough to spark ideas but open-ended enough for personal expression
+
+Format the response as a warm, inviting message that makes them want to start writing again."""
+
+                    # Generate personalized prompt using Mistral
+                    prompt_response = await agent.client.chat.complete_async(
+                        model="mistral-large-latest",
+                        messages=[
+                            {"role": "system", "content": "You are an empathetic journaling assistant."},
+                            {"role": "user", "content": prompt_context}
+                        ]
+                    )
+                    
+                    personalized_prompt = prompt_response.choices[0].message.content.strip()
+                    
+                    # Try to send DM to user
+                    try:
+                        # Get the Discord user object
+                        user = await bot.fetch_user(int(user_id))
+                        
+                        # Create and send the message
+                        message = (
+                            "📝 **Time for a Journal Entry!**\n\n"
+                            f"Hey {username}! I noticed it's been a while since your last journal entry. "
+                            "I've created a special prompt just for you:\n\n"
+                            f"{personalized_prompt}\n\n"
+                            "Ready to write? Just use the `!journal` command in our chat to share your thoughts!\n"
+                            "💭 *Your journal is a safe space for self-reflection and growth.*"
+                        )
+                        
+                        await user.send(message)
+                        logger.info(f"Sent journaling prompt to user {username} ({user_id})")
+                        
+                    except discord.Forbidden:
+                        logger.warning(f"Could not send DM to user {username} ({user_id})")
+                    except discord.HTTPException as e:
+                        logger.error(f"Error sending DM to user {username} ({user_id}): {str(e)}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing prompt for user {username} ({user_id}): {str(e)}")
+    
+    except Exception as e:
+        logger.error(f"Error in check_inactive_users task: {str(e)}")
+    
+    finally:
+        db_session.close()
+
+@check_inactive_users.before_loop
+async def before_check_inactive_users():
+    """Wait until the bot is ready before starting the task"""
+    await bot.wait_until_ready()
 
 # Start the bot, connecting it to the gateway
 bot.run(token)

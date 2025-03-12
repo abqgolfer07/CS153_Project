@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import json
 import re
 from typing import Dict, List, Tuple, Any
@@ -192,7 +192,7 @@ Keep the analysis constructive and action-oriented.'''
                 username=user_id,  # Using user_id as username for journal entries
                 message_content=processed_text,
                 bot_response="Journal Entry Logged",  # Placeholder response
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
             db_session.add(chat_log)
             db_session.flush()  # Get the chat_log.id
@@ -352,7 +352,7 @@ Keep the analysis constructive and action-oriented.'''
         db_session = self.Session()
         try:
             # Get entries within the specified time range
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = datetime.now(UTC) - timedelta(days=days)
             entries = (
                 db_session.query(ChatLog)
                 .filter(
@@ -434,7 +434,8 @@ Keep the analysis constructive and action-oriented.'''
                 anticipation=sentiment_analysis["emotions"]["anticipation"],
                 confidence=sentiment_analysis["confidence"],
                 intensity=sentiment_analysis["intensity"],
-                compound_score=sentiment_analysis["compound_score"]
+                compound_score=sentiment_analysis["compound_score"],
+                timestamp=datetime.now(UTC)
             )
             db_session.add(sentiment)
             db_session.flush()  # Get the sentiment ID
@@ -541,7 +542,7 @@ Keep the analysis constructive and action-oriented.'''
         db_session = self.Session()
         try:
             # Get entries within the specified time range
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = datetime.now(UTC) - timedelta(days=days)
             entries = (
                 db_session.query(ChatLog)
                 .filter(
@@ -785,7 +786,8 @@ Keep the analysis constructive and action-oriented.'''
                 anticipation=sentiment_analysis["emotions"]["anticipation"],
                 confidence=sentiment_analysis["confidence"],
                 intensity=sentiment_analysis["intensity"],
-                compound_score=sentiment_analysis["compound_score"]
+                compound_score=sentiment_analysis["compound_score"],
+                timestamp=datetime.now(UTC)
             )
             db_session.add(sentiment)
             db_session.flush()  # Get the sentiment ID

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
@@ -34,7 +34,7 @@ class Dashboard:
         db_session = self.Session()
         try:
             # Calculate cutoff date
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = datetime.now(UTC) - timedelta(days=days)
             
             # Query entries with their sentiment scores
             entries = (
@@ -164,7 +164,7 @@ class Dashboard:
             fig.update_yaxes(title_text="Emotion Intensity", row=2, col=1)
             
             # Save the figure
-            chart_path = os.path.join(self.chart_dir, f"mood_trends_{user_id}_{int(datetime.now().timestamp())}.png")
+            chart_path = os.path.join(self.chart_dir, f"mood_trends_{user_id}_{int(datetime.now(UTC).timestamp())}.png")
             fig.write_image(chart_path, scale=2)
             
             # Calculate statistics
@@ -200,7 +200,7 @@ class Dashboard:
             max_age_hours: Maximum age of files to keep (in hours)
         """
         try:
-            cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+            cutoff_time = datetime.now(UTC) - timedelta(hours=max_age_hours)
             
             for filename in os.listdir(self.chart_dir):
                 file_path = os.path.join(self.chart_dir, filename)

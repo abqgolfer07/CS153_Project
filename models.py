@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, UTC
 
 Base = declarative_base()
 
@@ -13,7 +13,7 @@ class ChatLog(Base):
     username = Column(String(100), nullable=False)
     message_content = Column(Text, nullable=False)
     bot_response = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC))
     
     # Relationship with sentiment analysis
     sentiment = relationship("MessageSentiment", back_populates="chat_log", uselist=False)
@@ -53,7 +53,7 @@ class FutureMessage(Base):
     username = Column(String(100), nullable=False)
     original_message = Column(Text, nullable=False)
     contextualized_message = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     sentiment_id = Column(Integer, ForeignKey('message_sentiments.id'))
     
     # Relationship with sentiment analysis
@@ -68,7 +68,7 @@ class Feedback(Base):
     username = Column(String(100), nullable=False)
     feedback_text = Column(Text, nullable=False)
     rating = Column(Integer)  # Optional numerical rating
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     sentiment_id = Column(Integer, ForeignKey('message_sentiments.id'))
     
     # Relationship with sentiment analysis
