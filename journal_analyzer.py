@@ -153,6 +153,39 @@ Analyze this feedback and provide insights in the following format:
 
 Keep the analysis constructive and action-oriented.'''
 
+        # Add growth forecast prompt template
+        self.growth_forecast_prompt = '''You are an AI assistant analyzing a user's journal entries to predict potential future growth and milestones.
+Review their emotional patterns, recurring themes, and personal development trajectory to generate meaningful predictions.
+
+User's Journal Data:
+{entries}
+
+Emotional Trends:
+{emotional_trends}
+
+Recurring Themes:
+{themes}
+
+Generate a growth forecast that includes:
+
+1. Emotional Growth Trajectory:
+[Analyze emotional patterns and predict likely developments in emotional intelligence and regulation]
+
+2. Personal Development Milestones:
+[Identify 3-4 specific, achievable milestones based on current patterns and interests]
+
+3. Potential Breakthroughs:
+[Predict 2-3 possible breakthrough moments in self-awareness or personal growth]
+
+4. Areas of Opportunity:
+[Highlight 2-3 areas where focused attention could accelerate growth]
+
+5. Timeline Predictions:
+[Suggest rough timeframes for predicted milestones and breakthroughs]
+
+Keep predictions grounded in observed patterns while maintaining an optimistic but realistic tone.
+Focus on actionable insights and achievable goals.'''
+
     def preprocess_text(self, text: str) -> str:
         """
         Preprocess the journal entry text
@@ -897,7 +930,7 @@ Keep the analysis constructive and action-oriented.'''
                 formatted_feedback.append(
                     f"Date: {entry.created_at.strftime('%Y-%m-%d')}\n"
                     f"Feedback: {entry.feedback_text}\n"
-                    f"Rating: {entry.rating if entry.rating else 'Not provided'}\n"
+                    f"Rating: {entry.rating if entry.rating is not None else 'Not provided'}\n"
                     f"Sentiment: {entry.sentiment.compound_score if entry.sentiment else 'Unknown'}\n"
                 )
             
@@ -1192,5 +1225,126 @@ Provide analysis in the following format:
                 "message": f"Error generating life story: {str(e)}"
             }
         
+        finally:
+            db_session.close()
+
+    async def generate_growth_forecast(self, user_id: str, days: int = 90) -> Dict[str, Any]:
+        """
+        Generate a growth forecast based on user's journal history and patterns
+        
+        Args:
+            user_id: The user's unique identifier
+            days: Number of past days to analyze for predictions (default 90)
+            
+        Returns:
+            Dictionary containing the forecast analysis and metadata
+        """
+        db_session = self.Session()
+        try:
+            # Get entries within the specified time range
+            cutoff_date = datetime.now(UTC) - timedelta(days=days)
+            entries = (
+                db_session.query(ChatLog)
+                .filter(
+                    ChatLog.user_id == user_id,
+                    ChatLog.timestamp >= cutoff_date
+                )
+                .order_by(ChatLog.timestamp.asc())
+                .all()
+            )
+            
+            if not entries:
+                return {
+                    "success": False,
+                    "message": "Insufficient journal entries for generating a growth forecast. Please continue journaling regularly."
+                }
+            
+            # Format entries for analysis
+            formatted_entries = []
+            for entry in entries:
+                date_str = entry.timestamp.strftime("%Y-%m-%d")
+                sentiment = entry.sentiment
+                emotion = self._get_dominant_emotion(sentiment) if sentiment else "Unknown"
+                score = sentiment.compound_score if sentiment else 0.0
+                
+                formatted_entries.append(
+                    f"Date: {date_str}\n"
+                    f"Entry: {entry.message_content}\n"
+                    f"Emotion: {emotion} (Score: {score:.2f})\n"
+                )
+            
+            # Get emotional trends
+            emotional_trends = await self.get_emotional_trends(user_id, days)
+            
+            # Analyze themes across entries
+            themes = set()
+            theme_keywords = {
+                "relationships": ["friend", "family", "partner", "relationship", "people"],
+                "career": ["work", "job", "career", "project", "study"],
+                "health": ["health", "exercise", "fitness", "diet", "sleep"],
+                "personal_growth": ["learn", "grow", "improve", "change", "goal"],
+                "creativity": ["create", "write", "art", "music", "express"],
+                "mindfulness": ["meditate", "reflect", "mindful", "peace", "calm"]
+            }
+            
+            for entry in entries:
+                content = entry.message_content.lower()
+                for theme, keywords in theme_keywords.items():
+                    if any(keyword in content for keyword in keywords):
+                        themes.add(theme)
+            
+            # Generate forecast using Mistral
+            forecast_response = await self.mistral_client.chat.complete_async(
+                model="mistral-large-latest",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an AI assistant specializing in personal growth analysis and prediction."
+                    },
+                    {
+                        "role": "user",
+                        "content": self.growth_forecast_prompt.format(
+                            entries="\n\n".join(formatted_entries),
+                            emotional_trends=json.dumps(emotional_trends, indent=2),
+                            themes=", ".join(themes)
+                        )
+                    }
+                ]
+            )
+            
+            forecast_text = forecast_response.choices[0].message.content.strip()
+            
+            # Calculate metadata
+            entry_count = len(entries)
+            date_range = {
+                "start": entries[0].timestamp.strftime("%Y-%m-%d"),
+                "end": entries[-1].timestamp.strftime("%Y-%m-%d")
+            }
+            
+            # Calculate emotional stability score
+            if emotional_trends.get('compound_trend'):
+                scores = emotional_trends['compound_trend']
+                emotional_stability = 1 - (max(scores) - min(scores)) / 2  # 1 is most stable
+            else:
+                emotional_stability = None
+            
+            return {
+                "success": True,
+                "forecast": forecast_text,
+                "metadata": {
+                    "entry_count": entry_count,
+                    "date_range": date_range,
+                    "days_analyzed": days,
+                    "identified_themes": list(themes),
+                    "emotional_stability": emotional_stability
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating growth forecast: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error generating growth forecast: {str(e)}"
+            }
         finally:
             db_session.close() 

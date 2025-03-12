@@ -888,64 +888,89 @@ async def on_reaction_add(reaction, user):
 @bot.command(name="menu", help="Display all available commands and their usage")
 async def menu(ctx):
     """Display all available commands and their usage"""
-    menu_text = "🤖 **Available Commands**\n\n"
+    
+    # Helper function to send message chunks
+    async def send_menu_section(title, content):
+        message = f"{title}\n{content}\n"
+        await ctx.send(message)
+
+    # Introduction
+    await ctx.send("🤖 **Available Commands**\n")
 
     # Journaling Commands
-    menu_text += "📝 **Journaling**\n"
-    menu_text += "`!journal <message>` - Log a journal entry and get sentiment analysis\n"
-    menu_text += "`!history [days=7]` - View your recent journal entries and emotional trends\n"
-    menu_text += "`!reflect [days=30]` - Generate a reflection analysis of your past entries\n"
-    menu_text += "\n💡 **Journaling Prompts**\n"
-    menu_text += "• Receive personalized writing prompts if you haven't journaled in a while\n"
-    menu_text += "• Prompts are tailored to your emotional patterns and previous entries\n"
-    menu_text += "• Sent automatically via DM to help maintain your journaling practice\n\n"
+    journaling_text = (
+        "📝 **Journaling**\n"
+        "`!journal <message>` - Log a journal entry and get sentiment analysis\n"
+        "`!history [days=7]` - View your recent journal entries and emotional trends\n"
+        "`!reflect [days=30]` - Generate a reflection analysis of your past entries\n"
+        "`!growthForecast [days=90]` - Generate a personalized growth forecast\n\n"
+        "💡 **Journaling Prompts**\n"
+        "• Receive personalized writing prompts if you haven't journaled in a while\n"
+        "• Prompts are tailored to your emotional patterns and previous entries\n"
+        "• Sent automatically via DM to help maintain your journaling practice"
+    )
+    await send_menu_section("", journaling_text)
 
     # Time Capsule Commands
-    menu_text += "⏳ **Time Capsule**\n"
-    menu_text += "`!futureMessage <message>` - Save a message for your future self\n"
-    menu_text += "`!viewFutureMessages [limit=5]` - View your saved messages\n\n"
+    time_capsule_text = (
+        "⏳ **Time Capsule**\n"
+        "`!futureMessage <message>` - Save a message for your future self\n"
+        "`!viewFutureMessages [limit=5]` - View your saved messages"
+    )
+    await send_menu_section("", time_capsule_text)
 
     # Analysis Commands
-    menu_text += "📊 **Analysis & Visualization**\n"
-    menu_text += "`!sentiment` - Get sentiment analysis for recent messages\n"
-    menu_text += "`!dashboard [days=30]` - View your mood trends dashboard\n"
-    menu_text += "`!timeline` - View your complete journal timeline\n"
-    menu_text += "`!lifeStory` - Generate an interactive narrative of your journey\n\n"
+    analysis_text = (
+        "📊 **Analysis & Visualization**\n"
+        "`!sentiment` - Get sentiment analysis for recent messages\n"
+        "`!dashboard [days=30]` - View your mood trends dashboard\n"
+        "`!timeline` - View your complete journal timeline\n"
+        "`!lifeStory` - Generate an interactive narrative of your journey"
+    )
+    await send_menu_section("", analysis_text)
 
     # Data Management Commands
-    menu_text += "🗑️ **Data Management**\n"
-    menu_text += "`!clear` - Clear all your journal entries and future messages\n"
-    menu_text += "`!clear journal` - Clear all your journal entries\n"
-    menu_text += "`!clear journal <entry_number>` - Delete a specific journal entry\n"
-    menu_text += "`!clear futureMessages` - Clear all your future messages\n"
-    menu_text += "`!clear futureMessage <message_number>` - Delete a specific future message\n\n"
+    data_mgmt_text = (
+        "🗑️ **Data Management**\n"
+        "`!clear` - Clear all your journal entries and future messages\n"
+        "`!clear journal` - Clear all your journal entries\n"
+        "`!clear journal <entry_number>` - Delete a specific journal entry\n"
+        "`!clear futureMessages` - Clear all your future messages\n"
+        "`!clear futureMessage <message_number>` - Delete a specific future message"
+    )
+    await send_menu_section("", data_mgmt_text)
 
     # Feedback Commands
-    menu_text += "💭 **Feedback**\n"
-    menu_text += "`!feedback <rating> <message>` - Submit feedback (rating: 1-5 required)\n"
-    menu_text += "`!viewFeedback` - View analysis of all feedback (Admin only)\n\n"
+    feedback_text = (
+        "💭 **Feedback**\n"
+        "`!feedback <rating> <message>` - Submit feedback (rating: 1-5 required)\n"
+        "`!viewFeedback` - View analysis of all feedback (Admin only)"
+    )
+    await send_menu_section("", feedback_text)
 
-    # Parameter Notation
-    menu_text += "📌 **Parameter Notation**\n"
-    menu_text += "• `<parameter>` - Required parameter\n"
-    menu_text += "• `[parameter]` - Optional parameter\n"
-    menu_text += "• `[parameter=default]` - Optional parameter with default value\n\n"
-
-    # Tips
-    menu_text += "💡 **Tips**\n"
-    menu_text += "• Commands are not case-sensitive\n"
-    menu_text += "• Use quotes for messages containing spaces\n"
-    menu_text += "• Some commands may take a moment to process\n"
-    menu_text += "• Entry numbers are shown in `!history` and `!viewFutureMessages` commands\n"
-    menu_text += "• Enable DMs to receive personalized journaling prompts\n"
+    # Parameter Notation and Tips
+    help_text = (
+        "📌 **Parameter Notation**\n"
+        "• `<parameter>` - Required parameter\n"
+        "• `[parameter]` - Optional parameter\n"
+        "• `[parameter=default]` - Optional parameter with default value\n\n"
+        "💡 **Tips**\n"
+        "• Commands are not case-sensitive\n"
+        "• Use quotes for messages containing spaces\n"
+        "• Some commands may take a moment to process\n"
+        "• Entry numbers are shown in `!history` and `!viewFutureMessages` commands\n"
+        "• Enable DMs to receive personalized journaling prompts"
+    )
+    await send_menu_section("", help_text)
 
     # Add Admin Commands section if user is authorized
     if str(ctx.author.id) in AUTHORIZED_USERS:
-        menu_text += "\n🔧 **Admin Commands**\n"
-        menu_text += "`!testPrompt [user_id]` - Test journaling prompt generation\n"
-        menu_text += "`!viewFeedback` - View analysis of all feedback\n\n"
-
-    await ctx.send(menu_text)
+        admin_text = (
+            "🔧 **Admin Commands**\n"
+            "`!testPrompt [user_id]` - Test journaling prompt generation\n"
+            "`!viewFeedback` - View analysis of all feedback"
+        )
+        await send_menu_section("", admin_text)
 
 @bot.command(name="testPrompt", help="(Admin only) Test the journaling prompt generation for a user")
 async def test_prompt(ctx, user_id: str = None):
@@ -1019,6 +1044,73 @@ Format the response as a warm, inviting message that makes them want to start wr
     except Exception as e:
         logger.error(f"Error in test_prompt command: {str(e)}")
         await ctx.send("❌ An error occurred while testing the prompt generation.")
+
+@bot.command(name="growthForecast", help="Generate a personalized growth forecast based on your journal entries")
+async def growth_forecast(ctx, days: int = 90):
+    """
+    Generate and display a growth forecast based on journal entries
+    
+    Args:
+        days: Number of past days to analyze (default: 90)
+    """
+    try:
+        # Send initial message
+        await ctx.send("🔮 Analyzing your journal entries to generate a growth forecast... This may take a moment.")
+        
+        # Generate forecast
+        result = await journal_analyzer.generate_growth_forecast(str(ctx.author.id), days)
+        
+        if not result["success"]:
+            await ctx.send(result["message"])
+            return
+        
+        # Format metadata for display
+        metadata = result["metadata"]
+        header = (
+            f"📈 **Personal Growth Forecast Analysis**\n"
+            f"Based on {metadata['entry_count']} entries from "
+            f"{metadata['date_range']['start']} to {metadata['date_range']['end']}\n\n"
+        )
+        
+        # Add emotional stability insight if available
+        if metadata['emotional_stability'] is not None:
+            stability = metadata['emotional_stability']
+            stability_desc = (
+                "very stable" if stability > 0.8
+                else "moderately stable" if stability > 0.6
+                else "somewhat variable" if stability > 0.4
+                else "highly variable"
+            )
+            header += f"Your emotional patterns have been {stability_desc} during this period.\n\n"
+        
+        # Add identified themes
+        if metadata['identified_themes']:
+            header += "**Key Areas of Focus:**\n"
+            header += "• " + "\n• ".join(metadata['identified_themes']) + "\n\n"
+        
+        await ctx.send(header)
+        
+        # Split forecast into chunks and send
+        forecast_chunks = [result["forecast"][i:i+1900] for i in range(0, len(result["forecast"]), 1900)]
+        for chunk in forecast_chunks:
+            if chunk.strip():  # Only send non-empty chunks
+                await ctx.send(chunk)
+        
+        # Add footer with tips
+        footer = (
+            "\n💡 **Tips for Using Your Growth Forecast:**\n"
+            "• Review these predictions periodically to track your progress\n"
+            "• Use `!journal` to document your journey toward these milestones\n"
+            "• Try `!reflect` to see how you're progressing on your growth path\n"
+            "• Adjust your focus based on the identified opportunities\n\n"
+            "*Remember: This forecast is a guide based on your patterns, not a fixed destiny. "
+            "You have the power to shape your growth journey!*"
+        )
+        await ctx.send(footer)
+        
+    except Exception as e:
+        logger.error(f"Error in growth_forecast command: {str(e)}")
+        await ctx.send("❌ I encountered an error while generating your growth forecast. Please try again later.")
 
 def _get_sentiment_description(score: float) -> str:
     """Get a description of the sentiment score"""
@@ -1184,13 +1276,20 @@ async def check_inactive_users():
             )
             
             # If user hasn't journaled in 7 days
-            if latest_entry and latest_entry.timestamp < cutoff_date:
-                try:
-                    # Get user's emotional history for context
-                    user_history = await journal_analyzer.get_emotional_trends(user_id, days=30)
-                    
-                    # Create a prompt based on user's history
-                    prompt_context = f"""Generate a personalized journaling prompt for a user who hasn't written in their journal for a while.
+            # Ensure timestamp is timezone-aware before comparison
+            if latest_entry:
+                entry_timestamp = latest_entry.timestamp
+                if entry_timestamp.tzinfo is None:
+                    # If timestamp is naive, make it timezone-aware
+                    entry_timestamp = entry_timestamp.replace(tzinfo=UTC)
+                
+                if entry_timestamp < cutoff_date:
+                    try:
+                        # Get user's emotional history for context
+                        user_history = await journal_analyzer.get_emotional_trends(user_id, days=30)
+                        
+                        # Create a prompt based on user's history
+                        prompt_context = f"""Generate a personalized journaling prompt for a user who hasn't written in their journal for a while.
 
 User's recent emotional trends:
 - Dominant emotions: {' → '.join(user_history.get('dominant_emotions', ['No data']))}
@@ -1204,42 +1303,42 @@ Create an engaging, thoughtful prompt that:
 
 Format the response as a warm, inviting message that makes them want to start writing again."""
 
-                    # Generate personalized prompt using Mistral
-                    prompt_response = await agent.client.chat.complete_async(
-                        model="mistral-large-latest",
-                        messages=[
-                            {"role": "system", "content": "You are an empathetic journaling assistant."},
-                            {"role": "user", "content": prompt_context}
-                        ]
-                    )
-                    
-                    personalized_prompt = prompt_response.choices[0].message.content.strip()
-                    
-                    # Try to send DM to user
-                    try:
-                        # Get the Discord user object
-                        user = await bot.fetch_user(int(user_id))
-                        
-                        # Create and send the message
-                        message = (
-                            "📝 **Time for a Journal Entry!**\n\n"
-                            f"Hey {username}! I noticed it's been a while since your last journal entry. "
-                            "I've created a special prompt just for you:\n\n"
-                            f"{personalized_prompt}\n\n"
-                            "Ready to write? Just use the `!journal` command in our chat to share your thoughts!\n"
-                            "💭 *Your journal is a safe space for self-reflection and growth.*"
+                        # Generate personalized prompt using Mistral
+                        prompt_response = await agent.client.chat.complete_async(
+                            model="mistral-large-latest",
+                            messages=[
+                                {"role": "system", "content": "You are an empathetic journaling assistant."},
+                                {"role": "user", "content": prompt_context}
+                            ]
                         )
                         
-                        await user.send(message)
-                        logger.info(f"Sent journaling prompt to user {username} ({user_id})")
+                        personalized_prompt = prompt_response.choices[0].message.content.strip()
                         
-                    except discord.Forbidden:
-                        logger.warning(f"Could not send DM to user {username} ({user_id})")
-                    except discord.HTTPException as e:
-                        logger.error(f"Error sending DM to user {username} ({user_id}): {str(e)}")
-                
-                except Exception as e:
-                    logger.error(f"Error processing prompt for user {username} ({user_id}): {str(e)}")
+                        # Try to send DM to user
+                        try:
+                            # Get the Discord user object
+                            user = await bot.fetch_user(int(user_id))
+                            
+                            # Create and send the message
+                            message = (
+                                "📝 **Time for a Journal Entry!**\n\n"
+                                f"Hey {username}! I noticed it's been a while since your last journal entry. "
+                                "I've created a special prompt just for you:\n\n"
+                                f"{personalized_prompt}\n\n"
+                                "Ready to write? Just use the `!journal` command in our chat to share your thoughts!\n"
+                                "💭 *Your journal is a safe space for self-reflection and growth.*"
+                            )
+                            
+                            await user.send(message)
+                            logger.info(f"Sent journaling prompt to user {username} ({user_id})")
+                            
+                        except discord.Forbidden:
+                            logger.warning(f"Could not send DM to user {username} ({user_id})")
+                        except discord.HTTPException as e:
+                            logger.error(f"Error sending DM to user {username} ({user_id}): {str(e)}")
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing prompt for user {username} ({user_id}): {str(e)}")
     
     except Exception as e:
         logger.error(f"Error in check_inactive_users task: {str(e)}")
