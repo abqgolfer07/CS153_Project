@@ -5,7 +5,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from agent import MistralAgent
 from sqlalchemy.orm import sessionmaker
-from models import engine, ChatLog
+from models import engine, ChatLog, FutureMessage
 from sentiment_analyzer import SentimentAnalyzer
 from journal_analyzer import JournalAnalyzer
 from dashboard import Dashboard
@@ -196,6 +196,87 @@ async def journal_entry(ctx, *, entry_text: str):
         logger.error(f"Error processing journal entry: {str(e)}")
         await ctx.send("I encountered an error while processing your journal entry. Please try again later.")
 
+@bot.command(name="clear", help="Clear your journal entries and future messages. Use '!clear journal' to clear all journal entries, '!clear journal <entry_number>' to delete a specific entry, '!clear futureMessages' to clear all future messages, or '!clear futureMessage <message_number>' to delete a specific future message.")
+async def clear(ctx, clear_type: str = None, entry_number: int = None):
+    """Clear journal entries or future messages"""
+    try:
+        db_session = Session()
+        
+        if not clear_type:
+            # Clear everything
+            try:
+                # Delete all chat logs (journal entries) for this user
+                db_session.query(ChatLog).filter(ChatLog.user_id == str(ctx.author.id)).delete()
+                # Delete all future messages for this user
+                db_session.query(FutureMessage).filter(FutureMessage.user_id == str(ctx.author.id)).delete()
+                db_session.commit()
+                await ctx.send("✨ Successfully cleared all your journal entries and future messages!")
+                return
+            except Exception as e:
+                logger.error(f"Error clearing all data: {str(e)}")
+                db_session.rollback()
+                await ctx.send("❌ An error occurred while clearing your data.")
+                return
+        
+        if clear_type.lower() == "journal":
+            if entry_number is not None:
+                # Get the specific entry
+                entries = (
+                    db_session.query(ChatLog)
+                    .filter(ChatLog.user_id == str(ctx.author.id))
+                    .order_by(ChatLog.timestamp.desc())
+                    .all()
+                )
+                
+                if not entries or entry_number > len(entries) or entry_number < 1:
+                    await ctx.send(f"❌ Entry #{entry_number} not found. You have {len(entries)} entries.")
+                    return
+                
+                # Delete the specific entry
+                entry_to_delete = entries[entry_number - 1]
+                db_session.delete(entry_to_delete)
+                db_session.commit()
+                await ctx.send(f"✨ Successfully deleted journal entry #{entry_number}!")
+            else:
+                # Delete all journal entries
+                db_session.query(ChatLog).filter(ChatLog.user_id == str(ctx.author.id)).delete()
+                db_session.commit()
+                await ctx.send("✨ Successfully cleared all your journal entries!")
+        
+        elif clear_type.lower() == "futuremessages" or clear_type.lower() == "futuremessage":
+            if entry_number is not None:
+                # Get the specific future message
+                messages = (
+                    db_session.query(FutureMessage)
+                    .filter(FutureMessage.user_id == str(ctx.author.id))
+                    .order_by(FutureMessage.created_at.desc())
+                    .all()
+                )
+                
+                if not messages or entry_number > len(messages) or entry_number < 1:
+                    await ctx.send(f"❌ Future message #{entry_number} not found. You have {len(messages)} messages.")
+                    return
+                
+                # Delete the specific message
+                message_to_delete = messages[entry_number - 1]
+                db_session.delete(message_to_delete)
+                db_session.commit()
+                await ctx.send(f"✨ Successfully deleted future message #{entry_number}!")
+            else:
+                # Delete all future messages
+                db_session.query(FutureMessage).filter(FutureMessage.user_id == str(ctx.author.id)).delete()
+                db_session.commit()
+                await ctx.send("✨ Successfully cleared all your future messages!")
+        
+        else:
+            await ctx.send("❌ Invalid clear type. Use '!clear journal' or '!clear futureMessages'.")
+    
+    except Exception as e:
+        logger.error(f"Error in clear command: {str(e)}")
+        await ctx.send("❌ An error occurred while processing your request.")
+    finally:
+        db_session.close()
+
 @bot.command(name="history", help="View your recent journal entries and emotional trends")
 async def view_history(ctx, days: int = 7):
     """View recent journal history and emotional trends"""
@@ -225,10 +306,10 @@ async def view_history(ctx, days: int = 7):
             
             response += f"• Overall Trend: Your emotional state appears to be {trend_direction}\n\n"
         
-        # Add recent entries
+        # Add recent entries with entry numbers
         response += "**Recent Entries:**\n"
-        for entry in history[:5]:  # Show last 5 entries
-            response += f"• {entry['timestamp'][:10]}: "
+        for i, entry in enumerate(history, 1):  # Start numbering from 1
+            response += f"• Entry #{i} ({entry['timestamp'][:10]}): "
             response += f"{entry['text'][:50]}... "
             response += f"[{entry['sentiment']['dominant_emotion']} | Score: {entry['sentiment']['compound_score']:.2f}]\n"
         
@@ -278,10 +359,11 @@ async def view_future_messages(ctx, limit: int = 5):
         # Send header
         await ctx.send("📝 **Your Messages to Your Future Self**\n")
         
-        # Send each message separately
-        for msg in messages:
+        # Send each message separately with message numbers
+        for i, msg in enumerate(messages, 1):  # Start numbering from 1
             # Send message header
-            header = f"📅 **Date:** {msg['created_at'][:10]}\n"
+            header = f"📅 **Message #{i}**\n"
+            header += f"**Date:** {msg['created_at'][:10]}\n"
             header += f"💭 **Feeling:** {msg['sentiment']['dominant_emotion'].title() if msg['sentiment'] else 'Unknown'}\n\n"
             await ctx.send(header)
             
@@ -825,6 +907,14 @@ async def menu(ctx):
     menu_text += "`!timeline` - View your complete journal timeline\n"
     menu_text += "`!lifeStory` - Generate an interactive narrative of your journey\n\n"
 
+    # Data Management Commands
+    menu_text += "🗑️ **Data Management**\n"
+    menu_text += "`!clear` - Clear all your journal entries and future messages\n"
+    menu_text += "`!clear journal` - Clear all your journal entries\n"
+    menu_text += "`!clear journal <entry_number>` - Delete a specific journal entry\n"
+    menu_text += "`!clear futureMessages` - Clear all your future messages\n"
+    menu_text += "`!clear futureMessage <message_number>` - Delete a specific future message\n\n"
+
     # Feedback Commands
     menu_text += "💭 **Feedback**\n"
     menu_text += "`!feedback <rating> <message>` - Submit feedback (rating: 1-5 required)\n"
@@ -841,6 +931,7 @@ async def menu(ctx):
     menu_text += "• Commands are not case-sensitive\n"
     menu_text += "• Use quotes for messages containing spaces\n"
     menu_text += "• Some commands may take a moment to process\n"
+    menu_text += "• Entry numbers are shown in `!history` and `!viewFutureMessages` commands\n"
 
     await ctx.send(menu_text)
 
